@@ -38,7 +38,7 @@ jobs:
         run: |
           export CARGO_HOME="$HOME/.cargo"
           export PATH="$CARGO_HOME/bin:$PATH"
-          cargo install --locked mdbook mdbook-plantuml mdbook-mermaid || true
+          cargo install mdbook mdbook-plantuml mdbook-mermaid || true
 
       - name: Download PlantUML jar
         run: |
