@@ -39,6 +39,22 @@ Generate and serve the book locally
 - mdbook-cv build book            # builds static site
 - mdbook-cv serve book            # serves at http://localhost:3000 by default
 
+Generating code documentation with an LLM + coding agent
+--------------------------------------------------------
+This repository includes documentation/SW_DOC_Prompt.md — a ready prompt to ask a coding agent (LLM) to produce a C4-style architecture documentation suite.
+
+Suggested workflow:
+1. Run or paste SW_DOC_Prompt.md into your coding agent (e.g., GitHub Copilot, ChatGPT, or any local LLM coding assistant) and request generation of the files into documentation/c4/.
+2. Review and edit generated files (especially PlantUML .puml files) — LLMs can make errors; validate syntax.
+3. Use mdbook-cv to build and serve the docs:
+   - mdbook-cv generate documentation/c4 --out book
+   - mdbook-cv build book
+   - mdbook-cv serve book
+
+Tips and safety
+- Always review LLM-generated architecture and code for accuracy and sensitive information leaks.
+- Validate PlantUML by running `plantuml -testdot` or using `mdbook-cv check` before building.
+
 Notes
 -----
 - If publishing to crates.io, users can install with `cargo install mdbook-cv` once published.
