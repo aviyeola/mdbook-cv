@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache cargo registry and git
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+
+      - name: Install mdbook (optional)
+        run: |
+          cargo install --locked mdbook || true
+
+      - name: Build (cargo)
+        run: cargo build --locked --verbose
+
+      - name: Run mdbook build (if available)
+        run: |
+          if command -v mdbook >/dev/null 2>&1; then
+            if [ -d "book" ]; then
+              mdbook build book || echo "mdbook build failed (non-fatal)"
+            else
+              echo "No book directory present; skipping mdbook build"
+            fi
+          else
+            echo "mdbook not installed; skipping"
+          fi
