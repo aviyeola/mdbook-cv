@@ -202,7 +202,6 @@ struct DepStatus {
     graphviz_found: bool,
     java_found: bool,
     plantuml_found: bool,
-    plantuml_path: Option<PathBuf>,
 }
 
 impl DepStatus {
@@ -268,13 +267,11 @@ fn check_deps_status() -> DepStatus {
 
     // Check plantuml.jar or plantuml command
     let mut plantuml_found = false;
-    let mut plantuml_path: Option<PathBuf> = None;
 
     if let Ok(p) = env::var("PLANTUML_JAR") {
         let pp = PathBuf::from(&p);
         if pp.exists() {
             plantuml_found = true;
-            plantuml_path = Some(pp);
         }
     }
 
@@ -286,7 +283,6 @@ fn check_deps_status() -> DepStatus {
         for c in candidates {
             if c.exists() {
                 plantuml_found = true;
-                plantuml_path = Some(c);
                 break;
             }
         }
@@ -307,7 +303,6 @@ fn check_deps_status() -> DepStatus {
         graphviz_found,
         java_found,
         plantuml_found,
-        plantuml_path,
     }
 }
 
