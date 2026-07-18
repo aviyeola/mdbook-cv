@@ -63,3 +63,33 @@ jobs:
             echo "No book directory present; nothing to build"
             exit 0
           fi
+
+      - name: Validate PlantUML rendering
+        run: |
+          set -e
+          OUTPUT_DIR="book/book"
+          echo "Checking build output in $OUTPUT_DIR"
+          if [ ! -d "$OUTPUT_DIR" ]; then
+            echo "Build output not found at $OUTPUT_DIR"
+            ls -la
+            exit 1
+          fi
+          # Look for generated image files (SVG/PNG)
+          IMG_COUNT=$(find "$OUTPUT_DIR" -type f \( -iname '*.svg' -o -iname '*.png' \) | wc -l)
+          echo "Found $IMG_COUNT image files in $OUTPUT_DIR"
+          if [ "$IMG_COUNT" -eq 0 ]; then
+            echo "No image files found; PlantUML rendering may have failed"
+            find "$OUTPUT_DIR" -maxdepth 2 -type f -ls || true
+            exit 1
+          fi
+          # Check diagrams page references an image
+          if grep -E -i '<img[^>]+\.(svg|png)' "$OUTPUT_DIR"/diagrams.html >/dev/null 2>&1; then
+            echo "PlantUML image referenced in diagrams.html"
+            exit 0
+          fi
+          if [ -f "$OUTPUT_DIR/diagrams/index.html" ] && grep -E -i '<img[^>]+\.(svg|png)' "$OUTPUT_DIR/diagrams/index.html" >/dev/null 2>&1; then
+            echo "PlantUML image referenced in diagrams/index.html"
+            exit 0
+          fi
+          echo "No image reference found in diagrams page; failing"
+          exit 1
