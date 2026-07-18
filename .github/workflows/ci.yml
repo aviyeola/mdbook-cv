@@ -20,6 +20,7 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
+            ~/.cargo/bin
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Setup Rust
@@ -28,21 +29,37 @@ jobs:
           toolchain: stable
           profile: minimal
 
-      - name: Install mdbook (optional)
+      - name: Install system deps for PlantUML
         run: |
-          cargo install --locked mdbook || true
+          sudo apt-get update
+          sudo apt-get install -y graphviz default-jre-headless curl || true
+
+      - name: Install mdbook and plugins
+        run: |
+          export CARGO_HOME="$HOME/.cargo"
+          export PATH="$CARGO_HOME/bin:$PATH"
+          cargo install --locked mdbook mdbook-plantuml mdbook-mermaid || true
+
+      - name: Download PlantUML jar
+        run: |
+          sudo mkdir -p /opt/plantuml
+          sudo curl -L -o /opt/plantuml/plantuml.jar https://github.com/plantuml/plantuml/releases/latest/download/plantuml.jar || true
 
       - name: Build (cargo)
         run: cargo build --locked --verbose
 
-      - name: Run mdbook build (if available)
+      - name: Run mdbook build (with plugins)
+        env:
+          PATH: ${{ env.HOME }}/.cargo/bin:/usr/local/bin:/usr/bin:/bin
         run: |
-          if command -v mdbook >/dev/null 2>&1; then
-            if [ -d "book" ]; then
-              mdbook build book || echo "mdbook build failed (non-fatal)"
-            else
-              echo "No book directory present; skipping mdbook build"
-            fi
+          if ! command -v mdbook >/dev/null 2>&1; then
+            echo "mdbook not found in PATH; failing"
+            exit 1
+          fi
+          if [ -d "book" ]; then
+            echo "Running mdbook build on ./book"
+            mdbook build book
           else
-            echo "mdbook not installed; skipping"
+            echo "No book directory present; nothing to build"
+            exit 0
           fi
