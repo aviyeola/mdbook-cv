@@ -1,5 +1,7 @@
 use std::env;
+use std::env;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use anyhow::{Context, Result};
@@ -35,8 +37,12 @@ enum Commands {
         #[arg(short, long)]
         book: Option<String>,
     },
-    /// Check for PlantUML jar and Graphviz (dot) and show resolutions
-    Check {},
+    /// Check for PlantUML jar and Graphviz (dot) and optionally download plantuml.jar
+    Check {
+        /// Attempt to download plantuml.jar to a default location if missing
+        #[arg(short, long)]
+        download: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -49,42 +55,53 @@ fn main() -> Result<()> {
             println!("Generated book at: {}", out.display());
         }
         Commands::Build { book } => {
-            // Run quick dependency check and warn if missing
-            let problems = check_deps();
-            if !problems.is_empty() {
+            let status = check_deps_status();
+            if !status.is_all_ok() {
                 eprintln!("Dependency check found issues:");
-                for p in &problems {
-                    eprintln!(" - {}", p);
+                for msg in status.summaries() {
+                    eprintln!(" - {}", msg);
                 }
                 eprintln!("Proceeding with mdbook build; rendering PlantUML may fail. Run `mdbook-cv check` for details and resolutions.");
             }
-
             let book = Path::new(book.as_deref().unwrap_or("book"));
             run_mdbook_build(book)?;
         }
         Commands::Serve { book } => {
-            let problems = check_deps();
-            if !problems.is_empty() {
+            let status = check_deps_status();
+            if !status.is_all_ok() {
                 eprintln!("Dependency check found issues (serving may not render diagrams):");
-                for p in &problems {
-                    eprintln!(" - {}", p);
+                for msg in status.summaries() {
+                    eprintln!(" - {}", msg);
                 }
                 eprintln!("Run `mdbook-cv check` for resolutions.");
             }
-
             let book = Path::new(book.as_deref().unwrap_or("book"));
             run_mdbook_serve(book)?;
         }
-        Commands::Check {} => {
-            let problems = check_deps();
-            if problems.is_empty() {
+        Commands::Check { download } => {
+            let mut status = check_deps_status();
+            if status.is_all_ok() {
                 println!("OK: Graphviz and PlantUML jar appear to be available.");
-            } else {
-                println!("Found issues:");
-                for p in &problems {
-                    println!("- {}", p);
+                return Ok(());
+            }
+
+            println!("Found issues:");
+            for msg in status.summaries() {
+                println!("- {}", msg);
+            }
+
+            println!("\nResolutions and installation hints:");
+            for hint in status.install_hints() {
+                println!("- {}", hint);
+            }
+
+            if *download && !status.plantuml_found {
+                let dst = default_plantuml_path();
+                println!("Attempting to download plantuml.jar to {}", dst.display());
+                match attempt_download_plantuml(&dst) {
+                    Ok(()) => println!("Downloaded plantuml.jar to {}. Set PLANTUML_JAR={} or move it to /opt/plantuml/plantuml.jar if you prefer.", dst.display(), dst.display()),
+                    Err(e) => eprintln!("Download failed: {}", e),
                 }
-                println!("\nResolutions:\n- Install Graphviz (dot). On Debian/Ubuntu: sudo apt-get install graphviz; macOS: brew install graphviz; Windows: use choco or download installer from https://graphviz.org/download/\n- Install Java (JRE/JDK). On Debian/Ubuntu: sudo apt-get install default-jre; macOS: brew install openjdk\n- Download plantuml.jar from https://plantuml.com/download and place it in /opt/plantuml/plantuml.jar or set PLANTUML_JAR environment variable pointing to it. Example: export PLANTUML_JAR=/opt/plantuml/plantuml.jar\n- Alternatively install a system 'plantuml' wrapper command if available.\n");
             }
         }
     }
@@ -171,60 +188,154 @@ fn run_mdbook_serve(book: &Path) -> Result<()> {
     Ok(())
 }
 
-fn check_deps() -> Vec<String> {
-    let mut problems: Vec<String> = Vec::new();
+struct DepStatus {
+    graphviz_found: bool,
+    java_found: bool,
+    plantuml_found: bool,
+    plantuml_path: Option<PathBuf>,
+}
 
-    // Check Graphviz (dot)
-    match Command::new("dot").arg("-V").output() {
-        Ok(_) => { /* found */ }
-        Err(e) => {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                problems.push("Graphviz 'dot' not found in PATH.".into());
-            } else {
-                problems.push(format!("Graphviz 'dot' check failed: {}", e));
+impl DepStatus {
+    fn is_all_ok(&self) -> bool {
+        self.graphviz_found && self.java_found && self.plantuml_found
+    }
+
+    fn summaries(&self) -> Vec<String> {
+        let mut v = Vec::new();
+        if !self.graphviz_found {
+            v.push("Graphviz 'dot' not found in PATH.".into());
+        }
+        if !self.java_found {
+            v.push("Java (JRE) not found in PATH.".into());
+        }
+        if !self.plantuml_found {
+            v.push("PlantUML jar not found and no system 'plantuml' command available.".into());
+        }
+        v
+    }
+
+    fn install_hints(&self) -> Vec<String> {
+        let os = env::consts::OS;
+        let mut v = Vec::new();
+        match os {
+            "linux" => {
+                v.push("Graphviz: sudo apt-get install graphviz (Debian/Ubuntu)".into());
+                v.push("Java: sudo apt-get install default-jre".into());
+                v.push("PlantUML jar: download https://github.com/plantuml/plantuml/releases/latest/download/plantuml.jar and place into $HOME/.plantuml/plantuml.jar or /opt/plantuml/plantuml.jar".into());
+            }
+            "macos" => {
+                v.push("Graphviz: brew install graphviz".into());
+                v.push("Java: brew install openjdk".into());
+                v.push("PlantUML jar: download from https://github.com/plantuml/plantuml/releases/latest/download/plantuml.jar and place into $HOME/.plantuml/plantuml.jar".into());
+            }
+            "windows" => {
+                v.push("Graphviz: choco install graphviz or download installer from https://graphviz.org/download/".into());
+                v.push("Java: choco install javaruntime or install from https://adoptium.net/".into());
+                v.push("PlantUML jar: download from https://github.com/plantuml/plantuml/releases/latest/download/plantuml.jar and place into %USERPROFILE%\\.plantuml\\plantuml.jar".into());
+            }
+            _ => {
+                v.push("Graphviz: install dot from your OS package manager or https://graphviz.org/download/".into());
+                v.push("Java: install JRE/JDK from https://adoptium.net/ or your OS packages".into());
+                v.push("PlantUML jar: download from https://github.com/plantuml/plantuml/releases/latest/download/plantuml.jar".into());
             }
         }
+        v
     }
+}
+
+fn check_deps_status() -> DepStatus {
+    // Check Graphviz (dot)
+    let graphviz_found = match Command::new("dot").arg("-V").output() {
+        Ok(_) => true,
+        Err(e) => e.kind() != std::io::ErrorKind::NotFound,
+    };
+
+    // Check Java
+    let java_found = match Command::new("java").arg("-version").output() {
+        Ok(o) => o.status.success() || !o.stderr.is_empty() || !o.stdout.is_empty(),
+        Err(e) => e.kind() != std::io::ErrorKind::NotFound,
+    };
 
     // Check plantuml.jar or plantuml command
-    let mut found_plantuml = false;
+    let mut plantuml_found = false;
+    let mut plantuml_path: Option<PathBuf> = None;
+
     if let Ok(p) = env::var("PLANTUML_JAR") {
-        if Path::new(&p).exists() {
-            found_plantuml = true;
-        } else {
-            problems.push(format!("PLANTUML_JAR is set to '{}' but file does not exist.", p));
+        let pp = PathBuf::from(&p);
+        if pp.exists() {
+            plantuml_found = true;
+            plantuml_path = Some(pp);
         }
     }
 
-    if !found_plantuml {
+    if !plantuml_found {
         let candidates = vec![
+            default_plantuml_path(),
             PathBuf::from("./plantuml.jar"),
-            PathBuf::from("/opt/plantuml/plantuml.jar"),
-            PathBuf::from(r"C:\\plantuml\\plantuml.jar"),
         ];
         for c in candidates {
             if c.exists() {
-                found_plantuml = true;
+                plantuml_found = true;
+                plantuml_path = Some(c);
                 break;
             }
         }
     }
 
-    if !found_plantuml {
-        // Check 'plantuml' executable as fallback
+    if !plantuml_found {
         match Command::new("plantuml").arg("-version").output() {
             Ok(o) => {
                 if o.status.success() {
-                    found_plantuml = true;
+                    plantuml_found = true;
                 }
             }
             Err(_) => {}
         }
     }
 
-    if !found_plantuml {
-        problems.push("PlantUML jar not found (no PLANTUML_JAR, ./plantuml.jar, /opt/plantuml/plantuml.jar, or system 'plantuml' command).".into());
+    DepStatus {
+        graphviz_found,
+        java_found,
+        plantuml_found,
+        plantuml_path,
+    }
+}
+
+fn default_plantuml_path() -> PathBuf {
+    if cfg!(target_os = "windows") {
+        if let Ok(up) = env::var("USERPROFILE") {
+            return PathBuf::from(format!("{}\\.plantuml\\plantuml.jar", up));
+        }
+        PathBuf::from(r"C:\\plantuml\\plantuml.jar")
+    } else {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(".plantuml").join("plantuml.jar");
+        }
+        PathBuf::from("/opt/plantuml/plantuml.jar")
+    }
+}
+
+fn attempt_download_plantuml(dst: &Path) -> Result<()> {
+    let url = "https://github.com/plantuml/plantuml/releases/latest/download/plantuml.jar";
+    let resp = reqwest::blocking::get(url).context("requesting plantuml.jar")?;
+    if !resp.status().is_success() {
+        anyhow::bail!("failed to download plantuml.jar: HTTP {}", resp.status());
+    }
+    let bytes = resp.bytes().context("reading response body")?;
+
+    if let Some(parent) = dst.parent() {
+        fs::create_dir_all(parent).context("creating plantuml dir")?;
+    }
+    let mut file = fs::File::create(dst).context("creating plantuml.jar file")?;
+    file.write_all(&bytes).context("writing plantuml.jar")?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = file.metadata()?.permissions();
+        perms.set_mode(0o644);
+        fs::set_permissions(dst, perms)?;
     }
 
-    problems
+    Ok(())
 }
