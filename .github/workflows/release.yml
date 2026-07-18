@@ -1,0 +1,85 @@
+name: Build release artifacts
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Build (release)
+        run: cargo build --release
+
+      - name: Package binary
+        run: |
+          mkdir -p release
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            # Windows uses PowerShell to compress
+            $exe = "target\\release\\mdbook-cv.exe"
+            if (Test-Path $exe) {
+              Copy-Item $exe -Destination "release\\mdbook-cv-windows.exe"
+              powershell -Command "Compress-Archive -Path release\\mdbook-cv-windows.exe -DestinationPath release\\mdbook-cv-windows.zip"
+            } else {
+              echo "Windows binary not found: $exe"; exit 1
+            }
+          else
+            BIN=target/release/mdbook-cv
+            if [ -f "$BIN" ]; then
+              cp "$BIN" "release/mdbook-cv-${{ runner.os }}"
+              tar -czf "release/mdbook-cv-${{ runner.os }}.tar.gz" -C release "mdbook-cv-${{ runner.os }}"
+            else
+              echo "Binary not found: $BIN"; exit 1
+            fi
+          fi
+        shell: bash
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mdbook-cv-${{ matrix.os }}
+          path: release/*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Linux artifact
+        if: contains(needs.build.outputs, '') == false || always()
+        uses: actions/download-artifact@v4
+        with:
+          name: mdbook-cv-ubuntu-latest
+          path: release || true
+
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: mdbook-cv-macos-latest
+          path: release || true
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: mdbook-cv-windows-latest
+          path: release || true
+
+      - name: Create GitHub Release and upload assets
+        uses: softprops/action-gh-release@v1
+        with:
+          files: release/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
