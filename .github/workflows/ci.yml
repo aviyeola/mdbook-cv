@@ -49,7 +49,7 @@ jobs:
         run: cargo generate-lockfile
 
       - name: Build (cargo)
-        run: cargo build --locked --verbose
+        run: cargo build --verbose
 
       - name: Run mdbook build (with plugins)
         env:
