@@ -1,5 +1,4 @@
 use std::env;
-use std::env;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -79,7 +78,7 @@ fn main() -> Result<()> {
             run_mdbook_serve(book)?;
         }
         Commands::Check { download } => {
-            let mut status = check_deps_status();
+            let status = check_deps_status();
             if status.is_all_ok() {
                 println!("OK: Graphviz and PlantUML jar appear to be available.");
                 return Ok(());
