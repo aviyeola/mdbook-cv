@@ -45,6 +45,9 @@ jobs:
           sudo mkdir -p /opt/plantuml
           sudo curl -L -o /opt/plantuml/plantuml.jar https://github.com/plantuml/plantuml/releases/latest/download/plantuml.jar || true
 
+      - name: Generate Cargo.lock (if missing)
+        run: cargo generate-lockfile
+
       - name: Build (cargo)
         run: cargo build --locked --verbose
 
