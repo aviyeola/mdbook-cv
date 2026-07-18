@@ -97,10 +97,21 @@ fn main() -> Result<()> {
 
             if *download && !status.plantuml_found {
                 let dst = default_plantuml_path();
-                println!("Attempting to download plantuml.jar to {}", dst.display());
-                match attempt_download_plantuml(&dst) {
-                    Ok(()) => println!("Downloaded plantuml.jar to {}. Set PLANTUML_JAR={} or move it to /opt/plantuml/plantuml.jar if you prefer.", dst.display(), dst.display()),
-                    Err(e) => eprintln!("Download failed: {}", e),
+                println!("plantuml.jar will be downloaded to: {}", dst.display());
+                // Prompt the user for confirmation
+                use std::io::{stdin, stdout};
+                print!("Proceed to download plantuml.jar to {}? [y/N]: ", dst.display());
+                stdout().flush()?;
+                let mut input = String::new();
+                stdin().read_line(&mut input)?;
+                let ans = input.trim().to_lowercase();
+                if ans == "y" || ans == "yes" {
+                    match attempt_download_plantuml(&dst) {
+                        Ok(()) => println!("Downloaded plantuml.jar to {}. Set PLANTUML_JAR={} or move it to /opt/plantuml/plantuml.jar if you prefer.", dst.display(), dst.display()),
+                        Err(e) => eprintln!("Download failed: {}", e),
+                    }
+                } else {
+                    println!("Download cancelled by user.");
                 }
             }
         }
