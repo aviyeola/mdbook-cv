@@ -1,3 +1,4 @@
+use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -34,6 +35,8 @@ enum Commands {
         #[arg(short, long)]
         book: Option<String>,
     },
+    /// Check for PlantUML jar and Graphviz (dot) and show resolutions
+    Check {},
 }
 
 fn main() -> Result<()> {
@@ -46,12 +49,43 @@ fn main() -> Result<()> {
             println!("Generated book at: {}", out.display());
         }
         Commands::Build { book } => {
+            // Run quick dependency check and warn if missing
+            let problems = check_deps();
+            if !problems.is_empty() {
+                eprintln!("Dependency check found issues:");
+                for p in &problems {
+                    eprintln!(" - {}", p);
+                }
+                eprintln!("Proceeding with mdbook build; rendering PlantUML may fail. Run `mdbook-cv check` for details and resolutions.");
+            }
+
             let book = Path::new(book.as_deref().unwrap_or("book"));
             run_mdbook_build(book)?;
         }
         Commands::Serve { book } => {
+            let problems = check_deps();
+            if !problems.is_empty() {
+                eprintln!("Dependency check found issues (serving may not render diagrams):");
+                for p in &problems {
+                    eprintln!(" - {}", p);
+                }
+                eprintln!("Run `mdbook-cv check` for resolutions.");
+            }
+
             let book = Path::new(book.as_deref().unwrap_or("book"));
             run_mdbook_serve(book)?;
+        }
+        Commands::Check {} => {
+            let problems = check_deps();
+            if problems.is_empty() {
+                println!("OK: Graphviz and PlantUML jar appear to be available.");
+            } else {
+                println!("Found issues:");
+                for p in &problems {
+                    println!("- {}", p);
+                }
+                println!("\nResolutions:\n- Install Graphviz (dot). On Debian/Ubuntu: sudo apt-get install graphviz; macOS: brew install graphviz; Windows: use choco or download installer from https://graphviz.org/download/\n- Install Java (JRE/JDK). On Debian/Ubuntu: sudo apt-get install default-jre; macOS: brew install openjdk\n- Download plantuml.jar from https://plantuml.com/download and place it in /opt/plantuml/plantuml.jar or set PLANTUML_JAR environment variable pointing to it. Example: export PLANTUML_JAR=/opt/plantuml/plantuml.jar\n- Alternatively install a system 'plantuml' wrapper command if available.\n");
+            }
         }
     }
     Ok(())
@@ -135,4 +169,62 @@ fn run_mdbook_serve(book: &Path) -> Result<()> {
         anyhow::bail!("mdbook serve exited with error");
     }
     Ok(())
+}
+
+fn check_deps() -> Vec<String> {
+    let mut problems: Vec<String> = Vec::new();
+
+    // Check Graphviz (dot)
+    match Command::new("dot").arg("-V").output() {
+        Ok(_) => { /* found */ }
+        Err(e) => {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                problems.push("Graphviz 'dot' not found in PATH.".into());
+            } else {
+                problems.push(format!("Graphviz 'dot' check failed: {}", e));
+            }
+        }
+    }
+
+    // Check plantuml.jar or plantuml command
+    let mut found_plantuml = false;
+    if let Ok(p) = env::var("PLANTUML_JAR") {
+        if Path::new(&p).exists() {
+            found_plantuml = true;
+        } else {
+            problems.push(format!("PLANTUML_JAR is set to '{}' but file does not exist.", p));
+        }
+    }
+
+    if !found_plantuml {
+        let candidates = vec![
+            PathBuf::from("./plantuml.jar"),
+            PathBuf::from("/opt/plantuml/plantuml.jar"),
+            PathBuf::from(r"C:\\plantuml\\plantuml.jar"),
+        ];
+        for c in candidates {
+            if c.exists() {
+                found_plantuml = true;
+                break;
+            }
+        }
+    }
+
+    if !found_plantuml {
+        // Check 'plantuml' executable as fallback
+        match Command::new("plantuml").arg("-version").output() {
+            Ok(o) => {
+                if o.status.success() {
+                    found_plantuml = true;
+                }
+            }
+            Err(_) => {}
+        }
+    }
+
+    if !found_plantuml {
+        problems.push("PlantUML jar not found (no PLANTUML_JAR, ./plantuml.jar, /opt/plantuml/plantuml.jar, or system 'plantuml' command).".into());
+    }
+
+    problems
 }
